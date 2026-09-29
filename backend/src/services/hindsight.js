@@ -21,22 +21,33 @@ async function storeResolution(projectId, incident, resolution) {
         `Root cause: ${resolution.rootCause}`,
         `Verified fix: ${resolution.fix}`,
         `Outcome: ${resolution.outcome}`,
-        resolution.technologies.length ? `Technologies: ${resolution.technologies.join(", ")}` : "",
+        resolution.technologies.length
+            ? `Technologies: ${resolution.technologies.join(", ")}`
+            : "",
     ].filter(Boolean).join("\n");
 
     await hindsight.retain(bankId(projectId), content, {
         context: `confirmed incident resolution for ${incident.service}`,
         documentId: `incident-${incident.id}`,
-        tags: ["confirmed-resolution", `service:${incident.service.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`],
+        tags: [
+            "confirmed-resolution",
+            `service:${incident.service.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`
+        ],
         timestamp: new Date().toISOString(),
     });
 }
 
-<<<<<<< Updated upstream
 async function recallMemories(projectId, incident) {
-    const query = [incident.title, incident.service, incident.environment, incident.symptoms, incident.logs]
+    const query = [
+        incident.title,
+        incident.service,
+        incident.environment,
+        incident.symptoms,
+        incident.logs
+    ]
         .filter(Boolean)
         .join("\n");
+
     const result = await hindsight.recall(bankId(projectId), query, {
         budget: "high",
         maxTokens: 1400,
@@ -54,10 +65,8 @@ async function recallMemories(projectId, incident) {
     }));
 }
 
-module.exports = { storeResolution, recallMemories, bankId };
-=======
-module.exports = {  
-    storeMemory,
-    recallMemories
+module.exports = {
+    storeResolution,
+    recallMemories,
+    bankId
 };
->>>>>>> Stashed changes
