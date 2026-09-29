@@ -11,7 +11,13 @@ function bankId(projectId) {
     return `${BANK_PREFIX}-${projectId}`;
 }
 
+async function ensureBank(projectId) {
+    await hindsight.createBank(bankId(projectId));
+}
+
 async function storeResolution(projectId, incident, resolution) {
+    await ensureBank(projectId);
+
     const content = [
         `Confirmed incident: ${incident.title}`,
         `Service: ${incident.service}`,
@@ -38,6 +44,8 @@ async function storeResolution(projectId, incident, resolution) {
 }
 
 async function recallMemories(projectId, incident) {
+    await ensureBank(projectId);
+
     const query = [
         incident.title,
         incident.service,
