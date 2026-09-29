@@ -1,122 +1,133 @@
 require("dotenv").config();
 
+const crypto = require("node:crypto");
 const express = require("express");
 const cors = require("cors");
-
 const { askAI } = require("./services/llm");
-const {
-    storeMemory,
-    recallMemories
-} = require("./services/hindsight");
+const { recallMemories, storeResolution, bankId } = require("./services/hindsight");
+const { diagnosisPrompt } = require("./utils/prompts");
+const { normalizeIncident, normalizeResolution } = require("./utils/validation");
 
-const { extractBugMemory } = require("./services/bugAnalyzer");
 const app = express();
+const pendingIncidents = new Map();
+const MAX_PENDING = 200;
 
-app.use(cors());
-app.use(express.json());
+app.use(cors({ origin: process.env.FRONTEND_ORIGIN || true }));
+app.use(express.json({ limit: "32kb" }));
 
-app.get("/", (req, res) => {
+function parseDiagnosis(raw) {
+    try {
+        const parsed = JSON.parse(raw);
+        return {
+            summary: parsed.summary || "Diagnosis generated",
+            likelyCause: parsed.likelyCause || "More evidence is needed.",
+            checks: Array.isArray(parsed.checks) ? parsed.checks.slice(0, 5) : [],
+            suggestedFix: parsed.suggestedFix || "Collect more diagnostics before changing production.",
+            confidence: ["low", "medium", "high"].includes(parsed.confidence) ? parsed.confidence : "low",
+            memoryContribution: parsed.memoryContribution || "No memory contribution reported.",
+        };
+    } catch {
+        throw new Error("The model returned an invalid structured diagnosis.");
+    }
+}
+
+async function diagnose(incident, memories) {
+    return parseDiagnosis(await askAI(diagnosisPrompt(incident, memories)));
+}
+
+app.get("/", (req, res) => res.json({ message: "BugFix Memory Agent is running" }));
+
+app.get("/api/health", (req, res) => {
     res.json({
-        message: "BugFix AI backend is running"
+        status: "ok",
+        memory: process.env.HINDSIGHT_BASE_URL ? "configured" : "missing_configuration",
+        model: process.env.GROQ_API_KEY ? "configured" : "missing_configuration",
     });
 });
 
-app.post("/api/bugs", async (req, res) => {
+async function analyzeIncident(req, res, next) {
     try {
-        const { bug } = req.body;
+        const incident = normalizeIncident(req.body);
+        const id = crypto.randomUUID();
+        let memories = [];
+        let memoryStatus = "recalled";
 
-        if (!bug) {
-            return res.status(400).json({
-                error: "Bug description is required"
-            });
+        try {
+            memories = await recallMemories(incident.projectId, incident);
+        } catch (error) {
+            memoryStatus = "unavailable";
+            console.warn("Hindsight recall unavailable:", error.message);
         }
 
-        // 1. Find similar bugs from memory
-        const memories = await recallMemories(
-            `Find previous bugs similar to this problem: ${bug}`
-        );
+        const [baseline, memoryGuided] = await Promise.all([
+            incident.memoryMode === "compare" ? diagnose(incident, []) : Promise.resolve(null),
+            diagnose(incident, memories),
+        ]);
 
-        console.log("\nRelevant memories:");
-        console.log(memories);
+        const saved = { ...incident, id, createdAt: new Date().toISOString() };
+        if (pendingIncidents.size >= MAX_PENDING) {
+            pendingIncidents.delete(pendingIncidents.keys().next().value);
+        }
+        pendingIncidents.set(id, saved);
 
-        // 2. Ask AI to investigate using those memories
-        const prompt = `
-            You are BugFix AI, a debugging assistant for software developers.
+        res.json({
+            incidentId: id,
+            baseline,
+            memoryGuided,
+            memories,
+            trace: {
+                bank: bankId(incident.projectId),
+                recalled: memories.length,
+                status: memoryStatus,
+                policy: "Only developer-confirmed resolutions are retained",
+            },
+        });
+    } catch (error) {
+        next(error);
+    }
+}
 
-            The developer reported:
+app.post("/api/incidents/analyze", analyzeIncident);
 
-            ${bug}
-
-            Previous bug memories:
-
-            ${memories.length > 0
-                ? memories.map((memory) => `- ${memory}`).join("\n")
-                : "No previous related bugs were found."
-            }
-
-            Your job is to investigate the current bug using the previous bug memories.
-
-            IMPORTANT:
-            - If a previous memory is relevant, clearly mention that a similar issue was found.
-            - Do not pretend a previous memory exists if there is none.
-            - Do not give a generic textbook explanation.
-            - Give practical debugging advice.
-            - Keep the response short.
-            - Do not use markdown headings.
-            - Do not use numbered sections.
-            - Do not write a long report.
-
-            Format your response naturally like this:
-
-            If relevant memory exists:
-
-            "I found a similar issue from a previous bug. [Briefly explain what happened before and what fixed it.]
-
-            For this bug, I'd check [most relevant things].
-
-            [One short explanation of why.]"
-
-            If there is no relevant memory:
-
-            "I don't have a similar previous bug in memory yet.
-
-            I'd start by checking [most likely causes].
-
-            [Short explanation.]"
-            `;
-
-                const diagnosis = await askAI(prompt);
-
-                // 3. Store this investigation in memory
-                const bugMemory = await extractBugMemory(
-                    bug,
-                    diagnosis
-                );
-
-                console.log("\nNew bug memory:");
-                console.log(bugMemory);
-
-                if (bugMemory) {
-                    await storeMemory(
-                        JSON.stringify(bugMemory)
-                    );
-                }
-
-                // 4. Send result back to React
-                res.json({
-                    reply: diagnosis,
-                    memories: memories.slice(0, 5)
-                });
-
-            } catch (error) {
-                console.error("Bug analysis error:", error);
-
-                res.status(500).json({
-                    error: "Bug analysis failed"
-                });
-            }
+// Backwards-compatible endpoint for the original client.
+app.post("/api/bugs", (req, res, next) => {
+    req.body = { ...req.body, symptoms: req.body.bug, memoryMode: "memory" };
+    return analyzeIncident(req, res, next);
 });
 
-app.listen(3000, () => {
-    console.log("BugFix AI backend running on http://localhost:3000");
+app.post("/api/incidents/:incidentId/resolve", async (req, res, next) => {
+    try {
+        const incident = pendingIncidents.get(req.params.incidentId);
+        if (!incident) {
+            const error = new Error("This incident expired or does not exist. Analyze it again first.");
+            error.statusCode = 404;
+            throw error;
+        }
+
+        const resolution = normalizeResolution(req.body);
+        await storeResolution(incident.projectId, incident, resolution);
+        pendingIncidents.delete(incident.id);
+
+        res.status(201).json({
+            learned: true,
+            bank: bankId(incident.projectId),
+            message: "Verified resolution retained in Hindsight for future incidents.",
+        });
+    } catch (error) {
+        next(error);
+    }
 });
+
+app.use((error, req, res, next) => {
+    console.error(error);
+    res.status(error.statusCode || 500).json({
+        error: error.statusCode ? error.message : "Incident analysis failed. Check the server configuration and try again.",
+    });
+});
+
+const port = Number(process.env.PORT) || 3000;
+if (require.main === module) {
+    app.listen(port, () => console.log(`BugFix Memory Agent running on http://localhost:${port}`));
+}
+
+module.exports = { app, parseDiagnosis };

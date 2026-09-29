@@ -1,354 +1,139 @@
+# BugFix — incident intelligence that compounds
 
-# 🐛 BugFix AI
+BugFix is a memory-powered incident-response copilot. It recalls how your team resolved similar production failures, compares that advice with a stateless AI baseline, and learns only the outcome an engineer confirms.
 
-### Memory-Powered Debugging Assistant
+The key idea is simple: **do not make the model's guess your organization's memory. Make the verified resolution the memory.**
 
-BugFix AI is a debugging assistant that uses **Hindsight persistent memory** to remember previous bugs, their root causes, fixes, and technologies involved.
+## Why it matters
 
-Instead of treating every bug as a completely new problem, BugFix AI can recall similar debugging incidents from the past and use that experience when investigating a new issue.
+Teams repeatedly pay to rediscover the same deployment traps, configuration drift, and service-specific failure modes. Generic assistants can suggest common causes, but they do not know that *this* team's checkout service once returned 401s because production pods referenced the previous JWT secret.
 
----
+BugFix turns resolved incidents into project-scoped, searchable operational knowledge:
 
-## 💡 Problem
+1. Describe the incident with symptoms and logs.
+2. Recall related facts from that project's Hindsight bank.
+3. Generate a stateless baseline and a memory-grounded diagnosis side by side.
+4. Show the exact memory evidence and what it changed.
+5. Let an engineer confirm the actual root cause and fix.
+6. Retain that verified resolution for the next incident.
 
-Developers often encounter the same or similar bugs multiple times.
+## What makes this different
 
-For example:
+- **Memory is visible:** a before/after view makes its value obvious in seconds.
+- **Learning is evidence-gated:** speculative diagnoses are not retained automatically.
+- **Banks are project-scoped:** unrelated teams and systems do not pollute one another's context.
+- **Recall is explainable:** the interface shows the facts Hindsight returned and the memory contribution to the answer.
+- **Logs are treated as data:** prompts explicitly reject instructions embedded in logs or recalled text.
+- **The workflow is operational:** service, environment, severity, logs, confidence, checks, mitigation, and confirmed resolution are first-class fields.
 
-- A Node.js API returns `401 Unauthorized`
-- The developer discovers a JWT configuration issue
-- Weeks later, a similar deployment issue happens again
-- The developer has to investigate the same problem from scratch
+## Architecture
 
-Most AI assistants can help solve the current bug, but they don't naturally build a persistent history of the developer's debugging experiences.
-
----
-
-## 🚀 Solution
-
-BugFix AI creates a persistent memory of debugging incidents.
-
-For every bug investigation, the system:
-
-1. Receives the developer's bug description.
-2. Searches Hindsight for similar previous incidents.
-3. Provides those memories to the AI.
-4. Generates debugging guidance using the retrieved experience.
-5. Extracts useful knowledge from the investigation.
-6. Stores the new bug knowledge back into Hindsight.
-
-This creates a continuous learning loop:
-
-```text
-Bug Report
-    ↓
-Recall Previous Bugs
-    ↓
-AI Diagnosis
-    ↓
-Extract Useful Knowledge
-    ↓
-Store in Hindsight
-    ↓
-Future Similar Bug
-    ↓
-Recall Previous Experience
-````
-
----
-
-## 🧠 Why Hindsight?
-
-Hindsight provides the persistent memory layer for BugFix AI.
-
-The application uses Hindsight to:
-
-* Recall similar debugging incidents
-* Remember root causes
-* Remember suggested fixes
-* Associate bugs with technologies
-* Reuse previous debugging knowledge in future investigations
-
-The key difference is that the assistant's knowledge can grow across separate debugging sessions.
-
----
-
-## 🏗️ Architecture
-
-```text
-                    ┌─────────────────────┐
-                    │   React Frontend    │
-                    │                     │
-                    │  Bug Investigation  │
-                    │  Memory Panel       │
-                    └──────────┬──────────┘
-                               │
-                               │ HTTP
-                               ↓
-                    ┌─────────────────────┐
-                    │  Node.js / Express  │
-                    │      Backend        │
-                    └──────────┬──────────┘
-                               │
-                ┌──────────────┴──────────────┐
-                │                             │
-                ↓                             ↓
-       ┌─────────────────┐          ┌─────────────────┐
-       │    Hindsight    │          │      Groq       │
-       │     Memory      │          │       LLM       │
-       │                 │          │                 │
-       │ Recall + Store  │          │ Diagnosis +     │
-       │ Bug Knowledge   │          │ Memory Extract  │
-       └─────────────────┘          └─────────────────┘
+```mermaid
+flowchart LR
+    A[Incident report] --> H[Hindsight recall]
+    A --> S[Stateless diagnosis]
+    H --> G[Memory-grounded diagnosis]
+    S --> UI[Before / after evidence view]
+    G --> UI
+    UI --> C[Engineer confirms root cause + fix]
+    C --> R[Hindsight retain]
+    R --> H
 ```
 
----
+Hindsight is the durable memory layer. `retain` converts confirmed incident narratives into structured facts and linked entities; `recall` combines semantic, keyword, graph, and temporal retrieval. BugFix allocates a bounded memory budget and passes the returned facts to the diagnosis model as evidence.
 
-## 🔄 Example
+See [the detailed memory contract](docs/ARCHITECTURE.md) and the [90-second demo runbook](docs/DEMO.md).
 
-### First investigation
+## Tech stack
 
-Developer:
+- React 19 + Vite
+- Node.js + Express
+- [Hindsight](https://github.com/vectorize-io/hindsight) via `@vectorize-io/hindsight-client`
+- Groq chat completions (model configurable with `GROQ_MODEL`)
 
-> My Node.js API is returning 401 after deployment. I'm using JWT authentication.
+## Run locally
 
-Hindsight:
-
-```text
-No relevant previous memory found.
-```
-
-BugFix AI investigates the issue and extracts knowledge such as:
-
-```text
-Bug:
-API returns 401 after deployment
-
-Root Cause:
-JWT secret mismatch or missing Authorization header
-
-Fix:
-Verify production JWT configuration and Authorization header
-
-Technologies:
-Node.js, JWT
-```
-
-This knowledge is stored in Hindsight.
-
-### Later investigation
-
-Developer:
-
-> After deploying my Node.js backend, I'm getting 401 Unauthorized with JWT authentication.
-
-Hindsight recalls the previous incident.
-
-BugFix AI can then respond using that previous debugging experience instead of starting from zero.
-
-The UI also displays the recalled memory:
-
-```text
-🧠 Relevant Memory Found
-
-Hindsight
-
-API returns 401 error after deployment due to
-JWT secret mismatch or missing Authorization header.
-
-● Recalled from previous debugging session
-```
-
----
-
-## 🛠️ Tech Stack
-
-### Frontend
-
-* React
-* Vite
-* CSS
-
-### Backend
-
-* Node.js
-* Express.js
-* CORS
-* dotenv
-
-### AI
-
-* Groq
-* `openai/gpt-oss-20b`
-
-### Memory
-
-* Hindsight
-* `@vectorize-io/hindsight-client`
-
----
-
-## 📁 Project Structure
-
-```text
-bugfix-memory-agent/
-│
-├── backend/
-│   ├── src/
-│   │   ├── server.js
-│   │   ├── routes/
-│   │   ├── services/
-│   │   │   ├── hindsight.js
-│   │   │   ├── llm.js
-│   │   │   └── bugAnalyzer.js
-│   │   └── utils/
-│   ├── .env
-│   └── package.json
-│
-├── frontend/
-│   ├── src/
-│   │   ├── App.jsx
-│   │   ├── main.jsx
-│   │   └── index.css
-│   └── package.json
-│
-├── .gitignore
-└── README.md
-```
-
----
-
-## ⚙️ Setup
-
-### 1. Clone the repository
+Requirements: Node.js 20+ and credentials for Groq and either [Hindsight Cloud](https://ui.hindsight.vectorize.io) or a self-hosted Hindsight instance.
 
 ```bash
-git clone <YOUR_GITHUB_REPOSITORY_URL>
+git clone https://github.com/MariyaAnjum937/bugfix-memory-agent.git
 cd bugfix-memory-agent
-```
 
-### 2. Install backend dependencies
-
-```bash
 cd backend
-npm install
-```
-
-### 3. Configure environment variables
-
-Create:
-
-```text
-backend/.env
-```
-
-Add:
-
-```env
-HINDSIGHT_API_KEY=your_hindsight_api_key
-HINDSIGHT_BASE_URL=https://api.hindsight.vectorize.io
-GROQ_API_KEY=your_groq_api_key
-```
-
-Never commit your `.env` file.
-
-### 4. Start the backend
-
-```bash
+cp .env.example .env
+# Add GROQ_API_KEY, HINDSIGHT_BASE_URL, and HINDSIGHT_API_KEY
+npm ci
 npm run dev
 ```
 
-The backend runs on:
-
-```text
-http://localhost:3000
-```
-
-### 5. Install frontend dependencies
-
-Open another terminal:
+In a second terminal:
 
 ```bash
 cd frontend
-npm install
-```
-
-### 6. Start the frontend
-
-```bash
+cp .env.example .env
+npm ci
 npm run dev
 ```
 
-Open the Vite URL shown in the terminal.
+Open `http://localhost:5173`. Use the built-in **JWT rollout** scenario for the fastest demo.
 
----
+## Environment variables
 
-## 🧪 Demo Flow
+| Variable | Purpose |
+|---|---|
+| `GROQ_API_KEY` | Groq authentication |
+| `GROQ_MODEL` | Chat model; defaults to `openai/gpt-oss-20b` |
+| `HINDSIGHT_BASE_URL` | Cloud or self-hosted Hindsight endpoint |
+| `HINDSIGHT_API_KEY` | Hindsight Cloud authentication |
+| `HINDSIGHT_BANK_PREFIX` | Prefix for project-scoped banks |
+| `FRONTEND_ORIGIN` | Allowed browser origin |
+| `VITE_API_URL` | Browser-visible backend URL |
 
-To demonstrate persistent memory:
+Never commit `.env` files or paste secrets into incident logs.
 
-### Test 1 — New bug
+## API example
 
-Submit:
-
-```text
-My Node.js API is returning 401 after deployment.
-I'm using JWT authentication.
+```bash
+curl -X POST http://localhost:3000/api/incidents/analyze \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "projectId": "payments-platform",
+    "title": "Checkout API returns 401 after deploy",
+    "service": "checkout-api",
+    "environment": "production",
+    "severity": "SEV-2",
+    "symptoms": "Authenticated checkout requests fail after the latest rollout.",
+    "logs": "JWT verification failed: invalid signature",
+    "memoryMode": "compare"
+  }'
 ```
 
-The system should have no relevant previous memory.
+The response includes a baseline diagnosis, memory-guided diagnosis, recalled facts, a project bank identifier, and an incident ID used to confirm the resolution.
 
-### Test 2 — Similar bug
+## Quality checks
 
-Submit:
-
-```text
-After deploying my Node.js backend,
-I'm getting 401 Unauthorized when using JWT authentication.
+```bash
+cd backend && npm test
+cd ../frontend && npm run lint && npm run build
 ```
 
-Hindsight should recall the previous debugging incident.
+## Current boundaries
 
-The UI will display the relevant memory and BugFix AI will use it while investigating the new bug.
+- Pending investigations are kept in process memory and expire on restart. A production deployment should persist them in a database.
+- Authentication and role-based access are not yet implemented; project bank IDs alone are not an authorization boundary.
+- Recommendations assist an engineer; they must not execute production changes automatically.
+- Recall quality improves as teams confirm more incidents and use consistent project/service names.
 
----
+## Roadmap
 
-## 🔐 Security
+- GitHub and Slack incident ingestion
+- Team authentication and audited bank access
+- Resolution quality review before retain
+- MTTR and repeated-incident analytics
+- Hindsight observation views for recurring failure patterns
 
-API keys are stored in environment variables and should never be committed to GitHub.
+## Hindsight resources
 
-The repository ignores:
-
-```text
-.env
-backend/.env
-node_modules
-frontend/node_modules
-frontend/dist
-```
-
----
-
-## 🎯 Hackathon Focus
-
-BugFix AI demonstrates how persistent agent memory can transform a debugging assistant from a stateless question-answering tool into an assistant that can build knowledge from previous debugging experiences.
-
-The core idea is simple:
-
-> **Don't solve every bug from scratch. Remember what you've already learned.**
-
----
-
-## 👩‍💻 Built For
-
-Hindsight Hackathon 2026
-
-Built with:
-
-* React
-* Node.js
-* Groq
-* Hindsight
-
-```
-```
+- [Hindsight documentation](https://hindsight.vectorize.io/)
+- [Hindsight GitHub repository](https://github.com/vectorize-io/hindsight)
+- [How agent memory works](https://vectorize.io/what-is-agent-memory)
