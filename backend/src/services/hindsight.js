@@ -32,6 +32,7 @@ async function storeResolution(projectId, incident, resolution) {
     });
 }
 
+<<<<<<< Updated upstream
 async function recallMemories(projectId, incident) {
     const query = [incident.title, incident.service, incident.environment, incident.symptoms, incident.logs]
         .filter(Boolean)
@@ -54,3 +55,9 @@ async function recallMemories(projectId, incident) {
 }
 
 module.exports = { storeResolution, recallMemories, bankId };
+=======
+module.exports = {  
+    storeMemory,
+    recallMemories
+};
+>>>>>>> Stashed changes
